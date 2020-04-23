@@ -1,0 +1,121 @@
+<html>
+<body>
+<video id="localVideo" autoplay playsinline muted></video>
+<video id="remoteVideo" autoplay playsinline></video>
+
+<script>
+  const run = async () => {
+    const localStream = await createLocalVideoStream()
+    const remoteStream = new MediaStream()
+    const rtcPeerConnection = await connectToIceServer(localStream)
+    const signalingServer = await connectToSignalingServer()
+
+    // Listen for changes in your network (from the ICE server), and send it to the peer.
+    // NOTE: this event will trigger right after we run rtcPeerConnection.setLocalDescription().
+    rtcPeerConnection.addEventListener('icecandidate', (event) => {
+      if (event.candidate) {
+        // NOTE: event.candidate contains your network details (internal/external ip addresses, port numbers, etc).
+
+        // Send our network details to the peer.
+        signalingServer.send(JSON.stringify({
+          type: 'candidate',
+          candidate: event.candidate,
+        }))
+      }
+    })
+
+    // Receive the peer's video and audio track stream details (from the ICE server), and assign it to the video element.
+    // NOTE: this event will trigger right after we run rtcPeerConnection.setRemoteDescription().
+    rtcPeerConnection.addEventListener('track', async (event) => {
+      remoteStream.addTrack(event.track)
+
+      document.querySelector('#remoteVideo').srcObject = remoteStream
+    })
+
+    // Listen for messages from the peer (this is coming from our websocket server).
+    signalingServer.addEventListener('message', async (event) => {
+      const message = JSON.parse(event.data)
+
+      if (message.type === 'peerConnected') {
+        // A peer has connected... let's create a SDP offer (track stream details) and send it to the peer.
+
+        // NOTE: localSdpOffer contains your track stream details (codec, browser support, source address, video/audio
+        // timing, etc).
+        const localSdpOffer = await rtcPeerConnection.createOffer()
+        // NOTE: setLocalDescription() will cause the rtcPeerConnection's icecandidate event to trigger.
+        await rtcPeerConnection.setLocalDescription(localSdpOffer)
+
+        // Send the SDP offer to the peer.
+        signalingServer.send(JSON.stringify({
+          type: 'sdpOffer',
+          sdpOffer: localSdpOffer,
+        }))
+      }
+      else if (message.type === 'sdpOffer') {
+        // Received a SDP offer (track stream details) from the peer... let's set it in our ICE server, and send back a
+        // SDP answer to the peer.
+
+        // NOTE: setRemoteDescription() will cause the rtcPeerConnection's track event to trigger.
+        await rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(message.sdpOffer))
+
+        // NOTE: localSdpOffer contains your track stream details (codec, browser support, source address, video/audio
+        // timing, etc).
+        const localSdpAnswer = await rtcPeerConnection.createAnswer()
+        // NOTE: setLocalDescription() will cause the rtcPeerConnection's icecandidate event to trigger.
+        await rtcPeerConnection.setLocalDescription(localSdpAnswer)
+
+        // Send the SDP answer to the peer.
+        signalingServer.send(JSON.stringify({
+          type: 'sdpAnswer',
+          sdpAnswer: localSdpAnswer,
+        }))
+      }
+      else if (message.type === 'sdpAnswer') {
+        // Received a SDP answer (track stream details) from the peer... let's set it in our ICE server. This should
+        // start the two-way video chat.
+
+        // NOTE: setRemoteDescription() will cause the rtcPeerConnection's track event to trigger.
+        await rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(message.sdpAnswer))
+      }
+      else if (message.type === 'candidate') {
+        // Received the peer's network details... let's set it in our ICE server.
+
+        await rtcPeerConnection.addIceCandidate(message.candidate)
+      }
+    })
+  }
+
+  const createLocalVideoStream = async () => {
+    const localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    })
+
+    // Assign the local video stream to the video element (so the user can see themself).
+    document.getElementById('localVideo').srcObject = localStream
+
+    return localStream
+  }
+
+  const connectToSignalingServer = async () => {
+    return new WebSocket('ws://localhost:8080')
+  }
+
+  const connectToIceServer = async (localStream) => {
+    const rtcPeerConnection = new RTCPeerConnection({
+      iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+    })
+
+    // Add our local video and audio track stream details to rtcPeerConnection. This will be sent to the ICE server
+    // later via rtcPeerConnection.setLocalDescription().
+    localStream.getTracks().forEach((track) => {
+      rtcPeerConnection.addTrack(track, localStream)
+    })
+
+    return rtcPeerConnection
+  }
+
+  run()
+</script>
+</body>
+</html>

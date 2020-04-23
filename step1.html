@@ -1,0 +1,60 @@
+<html>
+<body>
+<video id="localVideo" autoplay playsinline muted></video>
+<video id="remoteVideo" autoplay playsinline></video>
+
+<script>
+  const run = async () => {
+    const localStream = await createLocalVideoStream()
+    const rtcPeerConnection = await connectToIceServer(localStream)
+
+    // Listen for changes in your network (from the ICE server), and send it to the peer.
+    // NOTE: this event will trigger right after we run rtcPeerConnection.setLocalDescription().
+    rtcPeerConnection.addEventListener('icecandidate', (event) => {
+      if (event.candidate) {
+        // NOTE: event.candidate contains your network details (internal/external ip addresses, port numbers, etc).
+
+        // TODO: send our network details to the peer.
+      }
+    })
+
+    // Create and get SDP offer details from the ICE server.
+    // NOTE: localSdpOffer contains your track stream details (codec, browser support, source address, video/audio
+    // timing, etc).
+    const localSdpOffer = await rtcPeerConnection.createOffer()
+    // NOTE: setLocalDescription() will cause the rtcPeerConnection's icecandidate event to trigger.
+    await rtcPeerConnection.setLocalDescription(localSdpOffer)
+
+    // TODO: send the SDP offer to the peer.
+  }
+
+  const createLocalVideoStream = async () => {
+    const localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    })
+
+    // Assign the local video stream to the video element (so the user can see themself).
+    document.getElementById('localVideo').srcObject = localStream
+
+    return localStream
+  }
+
+  const connectToIceServer = async (localStream) => {
+    const rtcPeerConnection = new RTCPeerConnection({
+      iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+    })
+
+    // Add our local video and audio track stream details to rtcPeerConnection. This will be sent to the ICE server
+    // later via rtcPeerConnection.setLocalDescription().
+    localStream.getTracks().forEach((track) => {
+      rtcPeerConnection.addTrack(track, localStream)
+    })
+
+    return rtcPeerConnection
+  }
+
+  run()
+</script>
+</body>
+</html>
